@@ -1,4 +1,4 @@
-name: Build NestCam TV V1.1 Fullscreen APK
+name: Build NestCam TV V1.1 Fullscreen APK (SDK Fix)
 
 on:
   workflow_dispatch:
@@ -19,11 +19,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f settings.gradle ] && [ -f NestCam_TV_V1_1_Fullscreen_OneUpload.zip ]; then
-            unzip -oq NestCam_TV_V1_1_Fullscreen_OneUpload.zip -d .
+          if [ ! -f settings.gradle ]; then
+            for zip in NestCam_TV_V1_1_Fullscreen_BuildFix_OneUpload.zip NestCam_TV_V1_1_Fullscreen_OneUpload.zip; do
+              if [ -f "$zip" ]; then
+                echo "Unpacking $zip"
+                unzip -oq "$zip" -d .
+                break
+              fi
+            done
           fi
-          test -f settings.gradle
-          test -f tv/src/main/java/com/nestcam/tv/TvActivity.java
+          test -f settings.gradle || { echo '::error::Missing settings.gradle: upload project files or the NestCam TV ZIP to repository root'; exit 1; }
+          test -f tv/src/main/java/com/nestcam/tv/TvActivity.java || { echo '::error::TV source not found'; exit 1; }
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -31,14 +37,41 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android API 35
+      # GitHub-hosted ubuntu-24.04 already includes an Android SDK.
+      # Do NOT run android-actions/setup-android@v3 here: it can fail while
+      # re-downloading command-line tools before the app gets compiled.
+      - name: Use preinstalled Android SDK (API 35)
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::Android SDK directory missing: $SDK"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          printf 'sdk.dir=%s\n' "$SDK" > local.properties
+          echo "Android SDK: $SDK"
+          echo 'Preinstalled SDK platforms:'
+          ls -1 "$SDK/platforms" || true
+          echo 'Preinstalled build tools:'
+          ls -1 "$SDK/build-tools" || true
+          if [ ! -f "$SDK/platforms/android-35/android.jar" ] || [ ! -d "$SDK/build-tools/35.0.0" ]; then
+            echo 'API 35 or Build Tools 35 missing; installing only the missing SDK packages'
+            MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            if [ ! -x "$MANAGER" ]; then
+              MANAGER="$(find "$SDK/cmdline-tools" -maxdepth 3 -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1 || true)"
+            fi
+            if [ -z "$MANAGER" ] || [ ! -x "$MANAGER" ]; then
+              echo '::error::Cannot locate preinstalled sdkmanager'
+              exit 1
+            fi
+            yes | "$MANAGER" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+            "$MANAGER" --sdk_root="$SDK" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
+          test -f "$SDK/platforms/android-35/android.jar"
+          test -d "$SDK/build-tools/35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
