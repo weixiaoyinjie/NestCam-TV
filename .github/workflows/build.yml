@@ -1,0 +1,56 @@
+name: Build NestCam TV V1.1 Fullscreen APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack TV source if ZIP-only upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f settings.gradle ] && [ -f NestCam_TV_V1_1_Fullscreen_OneUpload.zip ]; then
+            unzip -oq NestCam_TV_V1_1_Fullscreen_OneUpload.zip -d .
+          fi
+          test -f settings.gradle
+          test -f tv/src/main/java/com/nestcam/tv/TvActivity.java
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build TV APK only
+        run: gradle --no-daemon --stacktrace :tv:assembleDebug
+
+      - name: Upload NestCam TV debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NestCam-TV-V1.1-Fullscreen-APK
+          path: tv/build/outputs/apk/debug/tv-debug.apk
+          if-no-files-found: error
